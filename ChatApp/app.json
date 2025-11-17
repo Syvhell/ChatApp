@@ -4,11 +4,11 @@
     "slug": "Estyll",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/3.png",
+    "icon": "./assets/Logo.jpg",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.jpg",
+      "image": "./assets/Logo.jpg",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
@@ -17,16 +17,20 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/Logo.jpg",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.syvhell.estyll"
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/Logo.jpg"
     },
     "extra": {
-      "backendUrl": "https://rich-clouds-follow.loca.lt"
+      "backendUrl": "https://rich-clouds-follow.loca.lt",
+      "eas": {
+        "projectId": "da23c112-642e-44fd-ad77-e6e73eb9cd94"
+      }
     }
   }
 }

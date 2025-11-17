@@ -1,89 +1,94 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet, View, Text, TextInput, FlatList, TouchableOpacity,
-  KeyboardAvoidingView, Platform, TouchableWithoutFeedback, Keyboard,
-  Image, Alert, Dimensions
+  KeyboardAvoidingView, Platform, TouchableWithoutFeedback, Keyboard, Image
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import io from 'socket.io-client';
 import Constants from 'expo-constants';
 
 const { backendUrl } = Constants.expoConfig.extra;
-const { width } = Dimensions.get('window');
 
-export default function ChatBoxScreen({ route, navigation }) {
+export default function ChatBoxScreen({ route }) {
   const { chatId, name, avatar } = route.params;
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [replyTo, setReplyTo] = useState(null);
   const [isOnline, setIsOnline] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
-  const [seenMessages, setSeenMessages] = useState([]);
-  
-  const socket = useRef(io(`${backendUrl}`)).current;
   const flatListRef = useRef();
 
-  // Fetch messages
+  const socketRef = useRef(null);
+
+  // Load messages
   const fetchMessages = async () => {
     try {
       const token = await AsyncStorage.getItem('token');
-      const res = await fetch(`${backendUrl}/api/chat/${chatId}`, {
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      const res = await fetch(`${backendUrl}/api/chat/${chatId}?limit=50`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       setMessages(data);
       flatListRef.current?.scrollToEnd({ animated: false });
     } catch (err) {
-      console.error(err);
-      Alert.alert("Error", err.message);
+      console.error('Fetch messages error:', err);
     }
   };
 
-  // Socket setup
+  // Setup socket
   useEffect(() => {
     fetchMessages();
-    socket.emit("join", chatId);
 
-    socket.on("onlineStatus", ({ userId, online }) => {
-      if (userId === chatId) setIsOnline(online);
-    });
+    const initSocket = async () => {
+      const userData = await AsyncStorage.getItem('user');
+      if (!userData) return;
+      const user = JSON.parse(userData);
 
-    socket.on("messageSeen", ({ messageId }) => {
-      setSeenMessages(prev => [...prev, messageId]);
-    });
+      socketRef.current = io(backendUrl, { transports: ['websocket'], autoConnect: true });
 
-    socket.on("typing", ({ userId, typing }) => {
-      if (userId === chatId) setIsTyping(typing);
-    });
+      socketRef.current.on('connect', () => {
+        console.log('Socket connected:', socketRef.current.id);
+        socketRef.current.emit('join', user._id);
+      });
 
-    socket.on("receiveMessage", (msg) => {
-      setMessages(prev => [...prev, msg]);
-      flatListRef.current?.scrollToEnd({ animated: true });
-    });
+      socketRef.current.on('onlineStatus', ({ userId, online }) => {
+        if (userId === chatId.toString()) setIsOnline(online);
+      });
 
-    socket.on("receiveVoice", (msg) => {
-      setMessages(prev => [...prev, msg]);
-      flatListRef.current?.scrollToEnd({ animated: true });
-    });
+      socketRef.current.on('typing', ({ userId, typing }) => {
+        if (userId === chatId.toString()) setIsTyping(typing);
+      });
+
+      socketRef.current.on('receiveMessage', (msg) => {
+        setMessages(prev => [...prev, msg]);
+        flatListRef.current?.scrollToEnd({ animated: true });
+      });
+
+      socketRef.current.on('disconnect', () => {
+        console.log('Socket disconnected');
+        setIsOnline(false);
+        setIsTyping(false);
+      });
+    };
+
+    initSocket();
 
     return () => {
-      socket.off("receiveMessage");
-      socket.off("typing");
-      socket.off("onlineStatus");
-      socket.off("messageSeen");
-      socket.off("receiveVoice");
+      socketRef.current?.off('receiveMessage');
+      socketRef.current?.off('typing');
+      socketRef.current?.off('onlineStatus');
+      socketRef.current?.disconnect();
     };
   }, []);
 
-  // Typing
   const handleTyping = (text) => {
     setInput(text);
-    socket.emit("typing", { chatId, typing: text.length > 0 });
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('typing', { chatId, typing: text.length > 0 });
+    }
   };
 
-  // Send message
   const sendMessage = async () => {
     if (!input.trim()) return;
 
@@ -92,102 +97,94 @@ export default function ChatBoxScreen({ route, navigation }) {
       sender: { _id: "me", avatar },
       text: input,
       type: "text",
-      replyTo: replyTo ? { _id: replyTo._id, text: replyTo.text, sender: replyTo.sender } : null,
+      replyTo: replyTo || null,
     };
-
     setMessages(prev => [...prev, tempMessage]);
     setInput('');
     setReplyTo(null);
 
-    try {
-      const token = await AsyncStorage.getItem("token");
-      socket.emit("sendMessage", {
-        receiverId: chatId,
-        text: tempMessage.text,
-        type: "text",
-        replyTo: tempMessage.replyTo?._id || null,
-      });
+    const token = await AsyncStorage.getItem('token');
 
+    // Emit message via socket
+    socketRef.current?.emit('sendMessage', {
+      receiverId: chatId,
+      text: tempMessage.text,
+      type: "text",
+      replyTo: tempMessage.replyTo?._id || null,
+    });
+
+    // Save message via API
+    try {
       await fetch(`${backendUrl}/api/chat/send`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ 
-          receiverId: chatId, 
-          text: tempMessage.text, 
-          replyTo: tempMessage.replyTo?._id || null 
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          receiverId: chatId,
+          text: tempMessage.text,
+          replyTo: tempMessage.replyTo?._id || null,
         }),
       });
-
-      socket.emit("seen", { chatId });
     } catch (err) {
-      console.error(err);
+      console.error('Send message error:', err);
     }
   };
 
-  // Pick media (placeholder)
-  const pickMedia = async (type) => {
-    // Implement your media picker here if needed
+ const renderMessageItem = ({ item }) => {
+    if (!item) return null; // safety check
+
+    // Typing indicator
+    if (item.type === 'typing') {
+      return (
+        <View style={{ padding: 6, paddingLeft: 12 }}>
+          <Text style={{ color: '#aaa', fontStyle: 'italic' }}>{item.text}</Text>
+        </View>
+      );
+    }
+
+    return (
+      <TouchableOpacity
+        style={[
+          styles.messageWrapper,
+          item.sender?._id === chatId ? styles.theirMessage : styles.myMessage
+        ]}
+        onLongPress={() => setReplyTo(item)}
+      >
+        {item.replyTo && (
+          <View style={styles.replyContainer}>
+            <Text style={styles.replyLabel}>Replying to:</Text>
+            <Text style={styles.replyText}>{item.replyTo?.text || ''}</Text>
+          </View>
+        )}
+        <View style={styles.messageContent}>
+          <Text style={styles.messageText}>{item.text}</Text>
+        </View>
+      </TouchableOpacity>
+    );
   };
 
-  // Render messages
-  const renderMessageItem = ({ item }) => (
-    <TouchableOpacity
-      onLongPress={() => setReplyTo(item)}
-      style={[
-        styles.messageWrapper,
-        item.sender._id === chatId ? styles.theirMessage : styles.myMessage
-      ]}
-    >
-      {item.replyTo && (
-        <View style={styles.replyPreview}>
-          <Text style={styles.replyLabelPreview}>Replying to:</Text>
-          <Text style={styles.replyTextPreview}>
-            {item.replyTo.text || 'Message deleted'}
-          </Text>
-        </View>
-      )}
-      <View style={styles.messageContent}>
-        <Image
-          source={ item.sender.avatar ? { uri: item.sender.avatar } : { uri: "https://i.pravatar.cc/150" }}
-          style={styles.messageAvatar}
-        />
-        {item.type === "text" && <Text style={styles.messageText}>{item.text}</Text>}
-      </View>
-      {item.sender._id === "me" && (
-        <Text style={{ color: seenMessages.includes(item._id) ? "#4CAF50" : "#999", fontSize: 10 }}>
-          {seenMessages.includes(item._id) ? "Seen" : "Delivered"}
-        </Text>
-      )}
-    </TouchableOpacity>
-  );
 
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: '#121212' }}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 80}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 80}
     >
       <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
         <View style={{ flex: 1 }}>
-          <Text style={{ color: "#bbb", textAlign: "center", paddingTop: 10 }}>
-            {isOnline ? "Active now 🟢" : "Offline ⚫"}
-          </Text>
-
-          {isTyping && (
-            <Text style={{ color: "#aaa", padding: 6, paddingLeft: 12 }}>
-              {name} is typing...
-            </Text>
-          )}
 
           <FlatList
             ref={flatListRef}
-            data={messages}
-            keyExtractor={(item) => item._id.toString()}
-            contentContainerStyle={{ padding: 10, paddingBottom: 20 }}
+            data={[
+              ...messages,
+              isTyping
+                ? { _id: 'typing', sender: { _id: chatId }, text: `${name} is typing...`, type: 'typing' }
+                : null
+            ].filter(Boolean)}
+            keyExtractor={item => (item._id ? item._id.toString() : Date.now().toString() + Math.random())}
             renderItem={renderMessageItem}
+            contentContainerStyle={{ padding: 10, paddingBottom: 80 }}
           />
 
-          {/* Replying Preview */}
           {replyTo && (
             <View style={styles.replyPreview}>
               <Text style={styles.replyLabelPreview}>Replying to:</Text>
@@ -198,7 +195,6 @@ export default function ChatBoxScreen({ route, navigation }) {
             </View>
           )}
 
-          {/* Input */}
           <View style={styles.inputWrapper}>
             <View style={styles.inputContainer}>
               <TextInput
@@ -211,11 +207,9 @@ export default function ChatBoxScreen({ route, navigation }) {
               <TouchableOpacity style={styles.sendButton} onPress={sendMessage}>
                 <Ionicons name="send" size={24} color="#fff" />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.mediaButton} onPress={() => pickMedia('image')}>
-                <Ionicons name="image" size={24} color="#0078fe" />
-              </TouchableOpacity>
             </View>
           </View>
+
         </View>
       </TouchableWithoutFeedback>
     </KeyboardAvoidingView>
@@ -223,19 +217,20 @@ export default function ChatBoxScreen({ route, navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#121212' },
   messageWrapper: { maxWidth: '75%', padding: 10, borderRadius: 12, marginVertical: 5 },
   myMessage: { backgroundColor: '#0078fe', alignSelf: 'flex-end', borderTopRightRadius: 4 },
   theirMessage: { backgroundColor: '#1e1e1e', alignSelf: 'flex-start', borderTopLeftRadius: 4 },
   messageText: { fontSize: 16, color: '#fff' },
+  messageContent: { flexDirection: 'row', alignItems: 'center' },
+  messageAvatar: { width: 30, height: 30, borderRadius: 15, marginRight: 8 },
   inputWrapper: { borderTopWidth: 1, borderColor: '#333', backgroundColor: '#1e1e1e', paddingBottom: Platform.OS === 'ios' ? 20 : 10 },
-  replyPreview: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#2a2a2a', paddingHorizontal: 10, paddingVertical: 5 },
-  replyLabelPreview: { fontWeight: 'bold', fontSize: 12, color: '#fff', marginRight: 5 },
-  replyTextPreview: { flex: 1, fontSize: 12, color: '#ccc' },
   inputContainer: { flexDirection: 'row', padding: 10, alignItems: 'center' },
   input: { flex: 1, borderWidth: 1, borderColor: '#333', borderRadius: 25, paddingHorizontal: 15, marginRight: 8, height: 45, color: '#fff', backgroundColor: '#2a2a2a' },
   sendButton: { backgroundColor: '#0078fe', borderRadius: 25, width: 45, height: 45, justifyContent: 'center', alignItems: 'center', marginLeft: 5 },
-  mediaButton: { backgroundColor: '#2a2a2a', borderRadius: 25, width: 45, height: 45, justifyContent: 'center', alignItems: 'center', marginLeft: 5 },
-  messageContent: { flexDirection: 'row', alignItems: 'center' },
-  messageAvatar: { width: 30, height: 30, borderRadius: 15, marginRight: 8 },
+  replyPreview: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#2a2a2a', paddingHorizontal: 10, paddingVertical: 5 },
+  replyLabelPreview: { fontWeight: 'bold', fontSize: 12, color: '#fff', marginRight: 5 },
+  replyTextPreview: { flex: 1, fontSize: 12, color: '#ccc' },
+  replyContainer: { backgroundColor: 'rgba(255,255,255,0.1)', padding: 6, borderRadius: 8, marginBottom: 5 },
+  replyLabel: { fontWeight: 'bold', fontSize: 12, color: '#fff' },
+  replyText: { fontSize: 12, opacity: 0.8, color: '#ddd' },
 });

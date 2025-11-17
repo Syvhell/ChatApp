@@ -54,7 +54,7 @@ export default function RegisterScreen({ navigation }) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>ChatApp</Text>
+        <Text style={styles.title}>Estyll</Text>
         <Text style={styles.subtitle}>
           Sign up to see photos and videos from your friends.
         </Text>

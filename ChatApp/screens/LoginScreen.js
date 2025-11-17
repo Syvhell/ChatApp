@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
-import { StyleSheet, View, Text, TextInput, Alert, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import {
+  StyleSheet, View, Text, TextInput, Alert, TouchableOpacity,
+  KeyboardAvoidingView, Platform, ScrollView, Image
+} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import CustomButton from '../components/CustomButton';
 import Constants from 'expo-constants';
@@ -10,39 +13,38 @@ export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
- const handleLogin = async () => {
-  if (!email || !password) {
-    Alert.alert('Error', 'Please enter both email and password');
-    return;
-  }
-
-  try {
-    const response = await fetch(`${backendUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
-
-    const data = await response.json(); // read once
-
-    if (!response.ok) {
-      throw new Error(data.message || 'Failed to login');
+  const handleLogin = async () => {
+    if (!email || !password) {
+      Alert.alert('Error', 'Please enter both email and password');
+      return;
     }
 
-    // Save JWT token
-    await AsyncStorage.setItem('token', data.token);
+    try {
+      const response = await fetch(`${backendUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
 
-    // Save user info (optional)
-    await AsyncStorage.setItem('user', JSON.stringify(data.user));
+      const data = await response.json();
 
-    Alert.alert('Success', `Welcome, ${data.user.username}!`);
-    navigation.navigate('Chat');
-  } catch (error) {
-    console.error(error);
-    Alert.alert('Login Failed', error.message);
-  }
-};
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to login');
+      }
 
+      await AsyncStorage.setItem('token', data.token);
+      await AsyncStorage.setItem('user', JSON.stringify(data.user));
+
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Chat' }],
+      });
+
+    } catch (error) {
+      console.error(error);
+      Alert.alert('Login Failed', error.message);
+    }
+  };
 
   return (
     <KeyboardAvoidingView
@@ -50,8 +52,19 @@ export default function LoginScreen({ navigation }) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>ChatApp</Text>
-        <Text style={styles.subtitle}>Log in to see photos and videos from your friends.</Text>
+        {/* Title with image */}
+        <View style={styles.titleContainer}>
+          <Text style={styles.title}>Estyll</Text>
+          <Image
+            source={require('../assets/icon.jpg')}
+            style={styles.logoImage}
+            resizeMode="contain"
+          />
+        </View>
+
+        <Text style={styles.subtitle}>
+          Log in to see photos and videos from your friends.
+        </Text>
 
         <TextInput
           style={styles.input}
@@ -97,11 +110,20 @@ const styles = StyleSheet.create({
     padding: 20,
     backgroundColor: '#121212',
   },
+  titleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
   title: {
     fontSize: 48,
     fontFamily: 'Billabong',
     color: '#fff',
-    marginBottom: 10,
+  },
+  logoImage: {
+    width: 40,
+    height: 40,
+    marginLeft: 8,
   },
   subtitle: {
     fontSize: 14,
@@ -141,4 +163,3 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 });
-
