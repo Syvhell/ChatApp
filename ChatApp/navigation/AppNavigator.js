@@ -45,7 +45,7 @@ export default function AppNavigator() {
       });
     } catch (err) {
       console.error(err);
-      Alert.alert('Logout Failed', err.message);
+      Alert.alert('Logout Failed', err.message );
     }
   };
 
